@@ -1,3 +1,8 @@
+import base64
+import uuid
+
+DOC_CACHE = {}
+
 from flask import Flask, request, send_file, jsonify
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -135,14 +140,14 @@ def prepare_docx():
                 else:
                     p2.alignment = align_map(footer2.get("alignment"))
 
+        file_id = uuid.uuid4().hex
         buffer = BytesIO()
         doc.save(buffer)
         buffer.seek(0)
 
-        filename = "output.docx"
-        doc.save(filename)
+        DOC_CACHE[file_id] = base64.b64encode(buffer.read()).decode("utf-8")
 
-        return jsonify({"status": "ready", "file": filename}), 200
+        return jsonify({"status": "ready", "file_id": file_id}), 200
 
     except Exception as e:
         print("Docx generation error:", e)
@@ -150,17 +155,23 @@ def prepare_docx():
 
 @app.route("/download_docx", methods=["GET"])
 def download_docx():
-    filename = "output.docx"
-
-    if not os.path.exists(filename):
-        return jsonify({"error": "No prepared file found. Run /prepare_docx first."}), 400
-
+    file_id = request.args.get("file_id")
+    if not file_id:
+        return jsonify({"error": "Missing file_id"}), 400
+    
+    if file_id not in DOC_CACHE:
+        return jsonify({"error": "File not found or expired"}), 404
+    
     try:
+        bdata = base64.b64decode(DOC_CACHE[file_id])
+        buffer = BytesIO(bdata)
+        buffer.seek(0)
+
         return send_file(
-            filename,
+            buffer,
             as_attachment=True,
-            download_name="document.docx",
+            download_name="generated.docx",
             mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
     except Exception as e:
-        return jsonify({"error": "Failed to download file", "details": str(e)}), 500
+        return jsonify({"error": "Failed to send file", "details": str(e)}), 500
