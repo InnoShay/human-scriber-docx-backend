@@ -1,67 +1,126 @@
 from flask import Flask, request, send_file, jsonify
 from docx import Document
-from docx.shared import Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Inches, Pt
 from io import BytesIO
 
 app = Flask(__name__)
 
+def align_map(value: str):
+    if not value:
+        return WD_ALIGN_PARAGRAPH.LEFT
+    v = value.lower()
+    if v == "center":
+        return WD_ALIGN_PARAGRAPH.CENTER
+    if v == "right":
+        return WD_ALIGN_PARAGRAPH.RIGHT
+    return WD_ALIGN_PARAGRAPH.LEFT
+
+def page_num_format(page, total, style):
+    if style == 1:
+        return f"{page}"
+    if style == 2:
+        return f"Page {page}"
+    if style == 3:
+        return f"{page} of {total}"
+    if style == 4:
+        return f"Page {page} of {total}"
+    return f"{page}"
+
 @app.route("/prepare_docx", methods=["POST"])
 def prepare_docx():
-    data = request.get_json(silent=True) or {}
+    try:
+        data = request.get_json()
 
-    text = data.get("text", "")
-    margins = data.get("margins", {})
-    header = data.get("header", {})
-    footer1 = data.get("footer1", {})
-    footer2 = data.get("footer2", {})
-    cover_page = data.get("cover_page", {})
+        text = data.get("text", "")
 
-    doc = Document()
+        margins = data.get("margins", {})
+        header = data.get("header", {})
+        footer1 = data.get("footer1", {})
+        footer2 = data.get("footer2", {})
+        cover = data.get("cover_page", {})
 
-    for section in doc.sections:
-        if "top" in margins:
-            section.top_margin = Inches(float(margins["top"]))
-        if "bottom" in margins:
-            section.bottom_margin = Inches(float(margins["bottom"]))
-        if "left" in margins:
-            section.left_margin = Inches(float(margins["left"]))
-        if "right" in margins:
-            section.right_margin = Inches(float(margins["right"]))
+        doc = Document()
 
-    if cover_page:
-        doc.add_heading(cover_page.get("title", ""), level=1)
-        doc.add_paragraph(f"Submitted to: {cover_page.get('submitted_to','')}")
-        doc.add_paragraph(f"Submitted by: {cover_page.get('submitted_by','')}")
-        doc.add_page_break()
+        section = doc.sections[0]
+        section.top_margin = Inches(float(margins.get("top", 1)))
+        section.bottom_margin = Inches(float(margins.get("bottom", 1)))
+        section.left_margin = Inches(float(margins.get("left", 1)))
+        section.right_margin = Inches(float(margins.get("right", 1)))
 
-    if header.get("content"):
-        for sec in doc.sections:
-            hdr = sec.header.paragraphs[0]
-            hdr.text = header["content"]
+        if cover:
+            cover_title = cover.get("title", "")
+            submitted_to = cover.get("submitted_to", "")
+            submitted_by = cover.get("submitted_by", "")
 
-    if footer1.get("content"):
-        for sec in doc.sections:
-            f = sec.footer.paragraphs[0]
-            f.text = footer1["content"]
+            if cover_title or submitted_to or submitted_by:
+                p = doc.add_paragraph()
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                run = p.add_run(cover_title)
+                run.bold = True
+                run.font.size = Pt(28)
 
-    doc.add_paragraph(text)
+                doc.add_paragraph()
 
-    file_stream = BytesIO()
-    doc.save(file_stream)
-    file_stream.seek(0)
+                if submitted_to:
+                    p = doc.add_paragraph(f"Submitted To: {submitted_to}")
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    p.runs[0].font.size = Pt(16)
 
-    return send_file(
-        file_stream,
-        as_attachment=True,
-        download_name="output.docx",
-        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )
+                if submitted_by:
+                    p = doc.add_paragraph(f"Submitted By: {submitted_by}")
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    p.runs[0].font.size = Pt(16)
 
+                doc.add_page_break()
 
-@app.route("/health")
-def health():
-    return jsonify({"status": "ok"}), 200
+        if header.get("content"):
+            for section in doc.sections:
+                hdr = section.header.paragraphs[0]
+                hdr.text = header["content"]
+                hdr.alignment = align_map(header.get("alignment"))
 
+        if text:
+            for line in text.split("\n"):
+                p = doc.add_paragraph(line)
+                p.style = "Normal"
 
-if __name__ == "__main__":
-    app.run(port=10000, host="0.0.0.0")
+        total_pages = 1  
+        fmt = int(footer2.get("format", 1))
+
+        for section in doc.sections:
+            ftr_paras = section.footer.paragraphs
+
+            if footer1.get("content"):
+                p1 = ftr_paras[0]
+                p1.text = footer1["content"]
+                p1.alignment = align_map(footer1.get("alignment", "left"))
+
+            if footer2.get("page_num"):
+                p2 = section.footer.add_paragraph()
+                p2.text = page_num_format(1, total_pages, fmt)
+
+                if footer1.get("alignment") == footer2.get("alignment"):
+                    if footer2["alignment"] == "right":
+                        p2.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                    elif footer2["alignment"] == "left":
+                        p2.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                    else:
+                        p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                else:
+                    p2.alignment = align_map(footer2.get("alignment"))
+
+        buffer = BytesIO()
+        doc.save(buffer)
+        buffer.seek(0)
+
+        return send_file(
+            buffer,
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            as_attachment=True,
+            download_name="generated.docx"
+        )
+
+    except Exception as e:
+        print("Docx generation error:", e)
+        return jsonify({"error": "Generation failed", "details": str(e)}), 500
