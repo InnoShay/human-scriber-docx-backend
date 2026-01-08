@@ -43,6 +43,26 @@ def prepare_docx():
         doc = Document()
 
         section = doc.sections[0]
+        sectPr = section._sectPr
+
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+
+        pgBorders = OxmlElement('w:pgBorders')
+        pgBorders.set(qn('w:offsetFrom'), 'page')
+
+        for border in ["top", "bottom", "left", "right"]:
+            elem = OxmlElement(f"w:{border}")
+            elem.set(qn('w:val'), 'single')      
+            elem.set(qn('w:sz'), '8')            
+            elem.set(qn('w:space'), '24')        
+            elem.set(qn('w:color'), '000000')    
+            pgBorders.append(elem)
+
+        sectPr.append(pgBorders)
+
+
+        section = doc.sections[0]
         section.top_margin = Inches(float(margins.get("top", 1)))
         section.bottom_margin = Inches(float(margins.get("bottom", 1)))
         section.left_margin = Inches(float(margins.get("left", 1)))
@@ -54,23 +74,27 @@ def prepare_docx():
             submitted_by = cover.get("submitted_by", "")
 
             if cover_title or submitted_to or submitted_by:
+
+                for _ in range(10):  
+                    doc.add_paragraph()
+
                 p = doc.add_paragraph()
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 run = p.add_run(cover_title)
                 run.bold = True
-                run.font.size = Pt(28)
+                run.font.size = Pt(32)
 
                 doc.add_paragraph()
 
                 if submitted_to:
                     p = doc.add_paragraph(f"Submitted To: {submitted_to}")
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    p.runs[0].font.size = Pt(16)
+                    p.runs[0].font.size = Pt(18)
 
                 if submitted_by:
                     p = doc.add_paragraph(f"Submitted By: {submitted_by}")
                     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    p.runs[0].font.size = Pt(16)
+                    p.runs[0].font.size = Pt(18)
 
                 doc.add_page_break()
 
