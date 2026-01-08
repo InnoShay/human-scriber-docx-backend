@@ -3,6 +3,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt
 from io import BytesIO
+from flask import send_file
 
 app = Flask(__name__)
 
@@ -138,13 +139,28 @@ def prepare_docx():
         doc.save(buffer)
         buffer.seek(0)
 
-        return send_file(
-            buffer,
-            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            as_attachment=True,
-            download_name="generated.docx"
-        )
+        filename = "output.docx"
+        doc.save(filename)
+
+        return jsonify({"status": "ready", "file": filename}), 200
 
     except Exception as e:
         print("Docx generation error:", e)
         return jsonify({"error": "Generation failed", "details": str(e)}), 500
+
+@app.route("/download_docx", methods=["GET"])
+def download_docx():
+    filename = "output.docx"
+
+    if not os.path.exists(filename):
+        return jsonify({"error": "No prepared file found. Run /prepare_docx first."}), 400
+
+    try:
+        return send_file(
+            filename,
+            as_attachment=True,
+            download_name="document.docx",
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+    except Exception as e:
+        return jsonify({"error": "Failed to download file", "details": str(e)}), 500
